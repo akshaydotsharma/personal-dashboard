@@ -707,9 +707,11 @@ private struct TripExpenseFilterSheet: View {
 /// the party is owed money by the group, negative means they owe. The group
 /// nets to zero.
 ///
-/// An UNSPLIT expense is owed entirely by whoever paid it, so it nets to zero
-/// for that party and never creates a balance — exactly right for a personal
-/// cost logged against the trip.
+/// An UNSPLIT expense is owed entirely by the USER, matching
+/// `LocalExpense.myShareSGD`. When the user also paid it the row nets to zero
+/// and creates no balance, which is right for a personal cost logged against
+/// the trip. When someone else fronted it, the user owes them the full amount
+/// (#504).
 enum TripSettlement {
     struct Balance: Identifiable {
         let party: SplitPartyID
@@ -740,8 +742,15 @@ enum TripSettlement {
             let splits = expense.splits
             let totalShares = splits.reduce(0) { $0 + max($1.shares, 0) }
             guard !splits.isEmpty, totalShares > 0 else {
-                // Unsplit (or degenerate): the payer bears the whole cost.
-                totals[payer, default: (0, 0)].owed += value
+                // Unsplit (or degenerate): the cost is the USER's in full, which
+                // is what `LocalExpense.myShareSGD` already assumes. It used to
+                // credit the payer instead (#504). The two agreed only while an
+                // unsplit row implied the user paid; now that another person can
+                // front an unsplit bill, crediting the payer would net it to zero
+                // and hide a real debt, while Finance still counted it as the
+                // user's spend. An unsplit expense paid by someone else means the
+                // user owes them the whole amount.
+                totals[.me, default: (0, 0)].owed += value
                 continue
             }
             for entry in splits {

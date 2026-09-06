@@ -1009,6 +1009,13 @@ struct AddExpenseSheet: View {
     /// Write the split state onto a row on save (trip context only). Persists a
     /// split only when someone other than the user shares the bill; otherwise
     /// clears the split so it's a plain personal expense.
+    ///
+    /// The payer is written on BOTH paths (#504). It used to live inside the
+    /// split branch, so an expense that stayed "Just you" had its `Paid by`
+    /// selection overwritten with nil on every save — the picker was offered,
+    /// accepted the choice, and discarded it, and `seedTripSplit` then read the
+    /// nil back as "You". An unsplit expense with another payer is a real
+    /// state: the cost is the user's, someone else fronted the money.
     private func applyTripSplit(to row: LocalExpense) {
         guard tripContext != nil else { return }
         if hasOtherParticipantsInSplit {
@@ -1018,13 +1025,12 @@ struct AddExpenseSheet: View {
                 case .person(let id): return ExpenseSplitEntry(person: id, shares: draft.shares)
                 }
             }
-            if case .person(let id) = payerParty {
-                row.paidByPersonUUID = id
-            } else {
-                row.paidByPersonUUID = nil
-            }
         } else {
             row.splits = []
+        }
+        if case .person(let id) = payerParty {
+            row.paidByPersonUUID = id
+        } else {
             row.paidByPersonUUID = nil
         }
     }
