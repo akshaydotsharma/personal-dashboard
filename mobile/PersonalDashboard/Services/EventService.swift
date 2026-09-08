@@ -66,12 +66,11 @@ struct EventService {
             return existing
         }
 
-        let cal = Calendar.current
         let now = Date()
         let row = LocalEvent(
             name: trimmed,
-            startDate: startDate.map { cal.startOfDay(for: $0) },
-            endDate: endDate.map { cal.startOfDay(for: $0) },
+            startDate: startDate.map(WallClock.dayAnchor(from:)),
+            endDate: endDate.map(WallClock.dayAnchor(from:)),
             tripUUID: tripUUID,
             createdAt: now,
             updatedAt: now
@@ -94,17 +93,16 @@ struct EventService {
         endDate: Date?? = nil,
         tripUUID: UUID?? = nil
     ) throws {
-        let cal = Calendar.current
         if let name {
             let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { throw EventServiceError.emptyName }
             event.name = trimmed
         }
         if let startDate {
-            event.startDate = startDate.map { cal.startOfDay(for: $0) }
+            event.startDate = startDate.map(WallClock.dayAnchor(from:))
         }
         if let endDate {
-            event.endDate = endDate.map { cal.startOfDay(for: $0) }
+            event.endDate = endDate.map(WallClock.dayAnchor(from:))
         }
         if let tripUUID {
             event.tripUUID = tripUUID

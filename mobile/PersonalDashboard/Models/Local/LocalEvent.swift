@@ -22,12 +22,13 @@ final class LocalEvent {
     /// reuses one record.
     var name: String
 
-    /// Optional first day of the event, inclusive. Stored at
-    /// `Calendar.startOfDay` when set. Nil for open-ended groupings.
+    /// Optional first day of the event, inclusive. Stored as a UTC-anchored
+    /// day via `WallClock.dayAnchor(from:)` when set, so the day does not move
+    /// with the device timezone (#506). Nil for open-ended groupings.
     var startDate: Date?
 
-    /// Optional last day of the event, inclusive. Stored at
-    /// `Calendar.startOfDay` when set.
+    /// Optional last day of the event, inclusive. Same UTC-anchored day shape
+    /// as `startDate`.
     var endDate: Date?
 
     /// Optional link to an existing `LocalTrip` (`LocalTrip.clientUUID`) so

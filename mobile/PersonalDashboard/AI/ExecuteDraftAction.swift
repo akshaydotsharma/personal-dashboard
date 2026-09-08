@@ -1126,14 +1126,16 @@ struct ExecuteDraftAction {
         guard !name.isEmpty else {
             throw DraftExecutionError.invalidArgument(field: "name", reason: "required")
         }
-        guard let startRaw = trimmedString(input["start_date"]), let start = parseAnyISODate(startRaw) else {
+        // A trip's start and end name calendar days, anchored at UTC midnight
+        // so they do not move with the device timezone (#506).
+        guard let startRaw = trimmedString(input["start_date"]),
+              let startOfStart = WallClock.dayAnchor(fromISO: startRaw) else {
             throw DraftExecutionError.invalidArgument(field: "start_date", reason: "required ISO 8601 date")
         }
-        guard let endRaw = trimmedString(input["end_date"]), let end = parseAnyISODate(endRaw) else {
+        guard let endRaw = trimmedString(input["end_date"]),
+              let startOfEnd = WallClock.dayAnchor(fromISO: endRaw) else {
             throw DraftExecutionError.invalidArgument(field: "end_date", reason: "required ISO 8601 date")
         }
-        let startOfStart = Calendar(identifier: .gregorian).startOfDay(for: start)
-        let startOfEnd = Calendar(identifier: .gregorian).startOfDay(for: end)
         guard startOfEnd >= startOfStart else {
             throw DraftExecutionError.invalidArgument(field: "end_date", reason: "must be on or after start_date")
         }
@@ -1163,7 +1165,6 @@ struct ExecuteDraftAction {
             throw DraftExecutionError.invalidArgument(field: "items", reason: "required and non-empty")
         }
 
-        let cal = Calendar(identifier: .gregorian)
         let now = Date()
         var addedTitles: [String] = []
 
@@ -1180,9 +1181,13 @@ struct ExecuteDraftAction {
             let title = (dict["title"]?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty else { continue }
 
+            // The day is read from the leading `yyyy-MM-dd` and anchored at
+            // UTC midnight (#506). `parseAnyISODate` already parses a date-only
+            // string in UTC, and `cal.startOfDay` then pushed it back to
+            // device-local midnight — which is how a stop written in one
+            // timezone came to read a day early in another.
             guard let dayRaw = dict["day_date"]?.stringValue,
-                  let day = parseAnyISODate(dayRaw) else { continue }
-            let dayStart = cal.startOfDay(for: day)
+                  let dayStart = WallClock.dayAnchor(fromISO: dayRaw) else { continue }
 
             // Map kind string; last-resort fallback is .activity per spec.
             let kindRaw = (dict["kind"]?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -1216,8 +1221,8 @@ struct ExecuteDraftAction {
             var endTimeValue: Date? = nil
             if kind == .stay {
                 if let endRaw = dict["end_date"]?.stringValue,
-                   let parsedEnd = parseAnyISODate(endRaw) {
-                    endDateValue = cal.startOfDay(for: parsedEnd)
+                   let anchoredEnd = WallClock.dayAnchor(fromISO: endRaw) {
+                    endDateValue = anchoredEnd
                 }
                 endTimeValue = parseWallClockTime(dict["end_time"]?.stringValue)
             }
@@ -1255,7 +1260,7 @@ struct ExecuteDraftAction {
             let venue = venueRaw == "null" ? "" : venueRaw
 
             let maxForDay = existing
-                .filter { cal.isDate($0.dayDate, inSameDayAs: dayStart) }
+                .filter { WallClock.isSameStoredDay($0.dayDate, dayStart) }
                 .map { $0.sortOrder }
                 .max() ?? -1
 
@@ -1304,7 +1309,6 @@ struct ExecuteDraftAction {
     private func updateTrip(_ input: [String: AnthropicJSONValue]) throws -> DraftActionOutcome {
         let uuid = try requireUUID(input["id"], entity: "trip")
         let row: LocalTrip = try fetchOne(uuid: uuid, entity: "trip")
-        let cal = Calendar(identifier: .gregorian)
 
         var changed = false
         if let name = trimmedString(input["name"]), !name.isEmpty {
@@ -1313,13 +1317,13 @@ struct ExecuteDraftAction {
         // start_date / end_date: empty = keep, real value = set. No "null" support (can't clear dates).
         if let raw = input["start_date"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
            !raw.isEmpty, raw != "null",
-           let parsed = parseAnyISODate(raw) {
-            row.startDate = cal.startOfDay(for: parsed); changed = true
+           let anchored = WallClock.dayAnchor(fromISO: raw) {
+            row.startDate = anchored; changed = true
         }
         if let raw = input["end_date"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
            !raw.isEmpty, raw != "null",
-           let parsed = parseAnyISODate(raw) {
-            row.endDate = cal.startOfDay(for: parsed); changed = true
+           let anchored = WallClock.dayAnchor(fromISO: raw) {
+            row.endDate = anchored; changed = true
         }
         // notes: empty = keep, "null" = clear (to ""), real value = set.
         if let raw = input["notes"]?.stringValue {
@@ -1373,13 +1377,12 @@ struct ExecuteDraftAction {
     private func updateItineraryItem(_ input: [String: AnthropicJSONValue]) throws -> DraftActionOutcome {
         let uuid = try requireUUID(input["id"], entity: "itinerary_item")
         let row: LocalItineraryItem = try fetchOne(uuid: uuid, entity: "itinerary_item")
-        let cal = Calendar(identifier: .gregorian)
 
         var changed = false
         if let raw = input["day_date"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
            !raw.isEmpty, raw != "null",
-           let parsed = parseAnyISODate(raw) {
-            row.dayDate = cal.startOfDay(for: parsed); changed = true
+           let anchored = WallClock.dayAnchor(fromISO: raw) {
+            row.dayDate = anchored; changed = true
         }
         if let raw = input["kind"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
            !raw.isEmpty, raw != "null",
@@ -1434,8 +1437,8 @@ struct ExecuteDraftAction {
             let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed == "null" {
                 row.endDate = nil; changed = true
-            } else if !trimmed.isEmpty, let parsed = parseAnyISODate(trimmed) {
-                row.endDate = cal.startOfDay(for: parsed); changed = true
+            } else if !trimmed.isEmpty, let anchored = WallClock.dayAnchor(fromISO: trimmed) {
+                row.endDate = anchored; changed = true
             }
         }
         if let raw = input["end_time"]?.stringValue {

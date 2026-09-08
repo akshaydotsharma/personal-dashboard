@@ -326,18 +326,23 @@ struct WalletTicketCard: View {
     /// card falls outside this one, so an old pass never reads as this year's.
     private var whenLabel: String {
         let calendar = Calendar.current
-        if calendar.isDateInToday(entry.day) {
+        // `entry.day` is a UTC-anchored day (#506). Project it to the local day
+        // naming that date before asking the device calendar anything about it:
+        // read raw, an anchor is "yesterday" anywhere west of UTC, so a card
+        // for today would print a date instead of TODAY.
+        let day = WallClock.deviceDay(from: entry.day)
+        if calendar.isDateInToday(day) {
             if let time = entry.card.startTime {
                 return TimelineEntry.itineraryTimeFormatter.string(from: time)
             }
             return "TODAY"
         }
-        let sameYear = calendar.component(.year, from: entry.day)
+        let sameYear = calendar.component(.year, from: day)
             == calendar.component(.year, from: Date())
         let style = Date.FormatStyle.dateTime.day().month(.abbreviated)
         let text = sameYear
-            ? entry.day.formatted(style)
-            : entry.day.formatted(style.year())
+            ? day.formatted(style)
+            : day.formatted(style.year())
         return text.uppercased()
     }
 }

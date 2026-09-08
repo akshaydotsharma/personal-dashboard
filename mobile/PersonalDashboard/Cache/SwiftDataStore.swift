@@ -424,6 +424,10 @@ final class SwiftDataStore {
         // One-time retag of pre-existing transport-shaped activities to the new
         // transport kind (#238). Guarded internally.
         migrateActivitiesToTransport()
+        // Re-anchors every stored DAY to UTC midnight so a calendar day stops
+        // moving with the device timezone (#506). Must run before any trip or
+        // wallet UI can query. Guarded internally.
+        migrateDayFieldsToUTCAnchor()
         #if DEBUG
         // Export / import launch hooks (#319 verification). No-op unless
         // DEXTER_EXPORT_TO / DEXTER_IMPORT_FROM are set.
@@ -602,6 +606,94 @@ final class SwiftDataStore {
         } catch {
             // Leave the flag unset so a future launch can retry. Never crash.
             NSLog("SwiftDataStore: itinerary UTC time migration failed: %@", String(describing: error))
+        }
+    }
+
+    /// Re-anchor every stored DAY to UTC midnight, once per device (#506).
+    ///
+    /// Eight fields name a calendar day but were written as a device-local
+    /// `startOfDay`, which is an instant. The day they reported therefore moved
+    /// with the device timezone. An Italy itinerary built in Singapore (UTC+8)
+    /// and India (UTC+5:30) read one day early once the Mac was on
+    /// `Europe/Rome`, while the stops added in Italy read correctly, which split
+    /// one day across two headers.
+    ///
+    /// Unlike ``migrateItineraryTimesToUTC()`` this needs no assumption about
+    /// where the row was written. A local midnight is always within 14 hours of
+    /// a UTC midnight, so ``WallClock/repairedDayAnchor(_:)`` recovers the
+    /// intended day by snapping to the nearest one, from any zone in
+    /// (-12, +12). That also makes it idempotent: an already-anchored value is
+    /// its own nearest midnight.
+    ///
+    /// `updatedAt` is deliberately NOT bumped, but not to keep the repair off
+    /// the wire — it does go on the wire. `SyncEngine.computeLocalChanges`
+    /// diffs by SHA-256 content hash, not by `updatedAt`, so re-anchoring ~105
+    /// fields changes ~105 hashes and the next pass emits them as upserts.
+    ///
+    /// The reason to leave `updatedAt` alone is record-level LWW. A repair is
+    /// not a user edit. Bumping the timestamp would make this migration win
+    /// every conflict against a genuine concurrent edit on another device, and
+    /// silently discard it. Left alone, each record keeps competing on its real
+    /// edit time.
+    ///
+    /// The emitted upserts are harmless and convergent: they carry anchored
+    /// values, and `DataImportService` anchors day fields on the way in
+    /// regardless — which is also what stops a peer still on an older build
+    /// from re-introducing the shift.
+    ///
+    /// Gated by a `UserDefaults` flag so it runs exactly once. Wrapped in
+    /// do/catch — never crashes launch.
+    private func migrateDayFieldsToUTCAnchor() {
+        let flagKey = "dayFieldsUTCAnchorMigrated_v1"
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: flagKey) else { return }
+
+        let ctx = container.mainContext
+
+        /// Repair in place, reporting whether the value actually moved so an
+        /// already-anchored store saves nothing.
+        func repair(_ current: Date) -> Date? {
+            let fixed = WallClock.repairedDayAnchor(current)
+            return fixed == current ? nil : fixed
+        }
+
+        do {
+            var changed = 0
+
+            for item in try ctx.fetch(FetchDescriptor<LocalItineraryItem>()) {
+                if let fixed = repair(item.dayDate) { item.dayDate = fixed; changed += 1 }
+                if let end = item.endDate, let fixed = repair(end) { item.endDate = fixed; changed += 1 }
+            }
+
+            for card in try ctx.fetch(FetchDescriptor<LocalWalletCard>()) {
+                if let fixed = repair(card.dayDate) { card.dayDate = fixed; changed += 1 }
+                if let end = card.endDate, let fixed = repair(end) { card.endDate = fixed; changed += 1 }
+            }
+
+            for trip in try ctx.fetch(FetchDescriptor<LocalTrip>()) {
+                if let fixed = repair(trip.startDate) { trip.startDate = fixed; changed += 1 }
+                if let fixed = repair(trip.endDate) { trip.endDate = fixed; changed += 1 }
+            }
+
+            // `LocalEvent`'s optional range is the same kind of field, written
+            // the same way, and it is rendered in Finance — so it drifted too.
+            for event in try ctx.fetch(FetchDescriptor<LocalEvent>()) {
+                if let start = event.startDate, let fixed = repair(start) {
+                    event.startDate = fixed; changed += 1
+                }
+                if let end = event.endDate, let fixed = repair(end) {
+                    event.endDate = fixed; changed += 1
+                }
+            }
+
+            if changed > 0 {
+                try ctx.save()
+            }
+            NSLog("SwiftDataStore: day-anchor migration re-anchored %d field(s)", changed)
+            defaults.set(true, forKey: flagKey)
+        } catch {
+            // Leave the flag unset so a future launch can retry. Never crash.
+            NSLog("SwiftDataStore: day-anchor migration failed: %@", String(describing: error))
         }
     }
 

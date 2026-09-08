@@ -635,8 +635,13 @@ final class DataImportService {
                 let trip = LocalTrip(
                     clientUUID: dto.clientUUID,
                     name: dto.name,
-                    startDate: dto.startDate,
-                    endDate: dto.endDate,
+                    // Day fields are anchored on the way in (#506). A peer or
+                    // archive written by an older build carries device-local
+                    // midnights, and letting those land would re-introduce the
+                    // day shift the launch migration just repaired. The repair
+                    // is idempotent, so an already-anchored value passes through.
+                    startDate: WallClock.repairedDayAnchor(dto.startDate),
+                    endDate: WallClock.repairedDayAnchor(dto.endDate),
                     notes: dto.notes,
                     createdAt: dto.createdAt,
                     updatedAt: dto.updatedAt
@@ -683,13 +688,14 @@ final class DataImportService {
                 let item = LocalItineraryItem(
                     clientUUID: dto.clientUUID,
                     tripUUID: dto.tripClientUUID,
-                    dayDate: dto.dayDate,
+                    // Anchored on the way in — see the trip loop above (#506).
+                    dayDate: WallClock.repairedDayAnchor(dto.dayDate),
                     kind: kind,
                     transportMode: transportMode,
                     title: dto.title,
                     notes: dto.notes,
                     startTime: dto.startTime,
-                    endDate: dto.endDate,
+                    endDate: dto.endDate.map(WallClock.repairedDayAnchor),
                     endTime: dto.endTime,
                     sortOrder: dto.sortOrder,
                     googleMapsLink: dto.googleMapsLink ?? "",
@@ -733,10 +739,11 @@ final class DataImportService {
                     clientUUID: dto.clientUUID,
                     kind: WalletCardKind(rawValue: dto.kind) ?? .pass,
                     title: dto.title,
-                    dayDate: dto.dayDate,
+                    // Anchored on the way in — see the trip loop above (#506).
+                    dayDate: WallClock.repairedDayAnchor(dto.dayDate),
                     startTime: dto.startTime,
                     arrivalTime: dto.arrivalTime,
-                    endDate: dto.endDate,
+                    endDate: dto.endDate.map(WallClock.repairedDayAnchor),
                     endTime: dto.endTime,
                     notes: dto.notes,
                     venue: dto.venue,

@@ -14,11 +14,15 @@ import SwiftData
 /// so the pointer never enters it — hover stays latched on the cell underneath
 /// and the card cannot flicker itself in and out of existence.
 ///
-/// Purely for viewing: nothing here edits or navigates. All day math runs
-/// through `Calendar.current`, matching how `LocalTodo.dueDate` and
-/// `LocalItineraryItem.dayDate` are stored. Itinerary *times* are the one
-/// exception — those are UTC-anchored wall clock, so they render through
-/// `TimelineEntry.itineraryTimeFormatter` exactly as the trip timeline does.
+/// Purely for viewing: nothing here edits or navigates. The grid is the
+/// DEVICE's calendar, so its day math runs through `Calendar.current`, matching
+/// how `LocalTodo.dueDate` is stored.
+///
+/// Trip and itinerary days are the exception: those are UTC anchors (#506), so
+/// each is projected onto the grid with `WallClock.deviceDay(from:)` before it
+/// is matched to a cell. Itinerary *times* are UTC-anchored wall clock and
+/// render through `TimelineEntry.itineraryTimeFormatter`, exactly as the trip
+/// timeline does.
 struct TaskCalendarPopover: View {
     @Query(filter: #Predicate<LocalTodo> { $0.deletedAt == nil })
     private var todos: [LocalTodo]
@@ -597,8 +601,8 @@ struct TaskCalendarPopover: View {
     /// "Day 3 of 7" — cheap orientation for a day sitting mid-trip.
     private func tripDayLabel(_ trip: LocalTrip, on day: Date) -> String? {
         let cal = Calendar.current
-        let start = cal.startOfDay(for: trip.startDate)
-        let end = cal.startOfDay(for: trip.endDate)
+        let start = cal.startOfDay(for: WallClock.deviceDay(from: trip.startDate))
+        let end = cal.startOfDay(for: WallClock.deviceDay(from: trip.endDate))
         guard let index = cal.dateComponents([.day], from: start, to: day).day,
               let span = cal.dateComponents([.day], from: start, to: end).day
         else { return nil }
@@ -654,8 +658,8 @@ struct TaskCalendarPopover: View {
         let cal = Calendar.current
         return trips
             .filter { trip in
-                let start = cal.startOfDay(for: trip.startDate)
-                let end = cal.startOfDay(for: trip.endDate)
+                let start = cal.startOfDay(for: WallClock.deviceDay(from: trip.startDate))
+                let end = cal.startOfDay(for: WallClock.deviceDay(from: trip.endDate))
                 return day >= start && day <= end
             }
             .sorted { $0.startDate < $1.startDate }
@@ -669,12 +673,12 @@ struct TaskCalendarPopover: View {
         let cal = Calendar.current
         var result: [DayPlan] = []
         for item in itineraryItems {
-            let inDay = cal.startOfDay(for: item.dayDate)
+            let inDay = cal.startOfDay(for: WallClock.deviceDay(from: item.dayDate))
             if inDay == day {
                 result.append(DayPlan(item: item, isCheckOut: false))
             }
             if item.kindEnum == .stay, let endDate = item.endDate {
-                let outDay = cal.startOfDay(for: endDate)
+                let outDay = cal.startOfDay(for: WallClock.deviceDay(from: endDate))
                 if outDay != inDay && outDay == day {
                     result.append(DayPlan(item: item, isCheckOut: true))
                 }

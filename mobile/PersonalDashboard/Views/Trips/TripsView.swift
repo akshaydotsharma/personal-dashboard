@@ -174,12 +174,14 @@ struct TripsView: View {
     }
 
     private var tripGroups: TripGroups {
-        let today = Calendar.current.startOfDay(for: .now)
+        // Trip days are UTC anchors, so "today" is anchored before comparing
+        // against them (#506).
+        let today = WallClock.todayAnchor()
         var groups = TripGroups()
         for trip in trips {
-            if trip.endDate < today {
+            if WallClock.startOfStoredDay(trip.endDate) < today {
                 groups.past.append(trip)
-            } else if trip.startDate > today {
+            } else if WallClock.startOfStoredDay(trip.startDate) > today {
                 groups.upcoming.append(trip)
             } else {
                 groups.active.append(trip)
@@ -481,19 +483,20 @@ private struct TripRow: View {
     /// "Day 3 of 8" while you are on the trip, "In 12 days" before it. Nothing for
     /// a Past trip, whose date range already says everything there is to say.
     private var relativeStatus: String? {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: .now)
-        let start = cal.startOfDay(for: trip.startDate)
-        let end = cal.startOfDay(for: trip.endDate)
+        // Day counts run in the UTC calendar because the trip's days are
+        // anchored there (#506); "today" is anchored to match.
+        let today = WallClock.todayAnchor()
+        let start = WallClock.startOfStoredDay(trip.startDate)
+        let end = WallClock.startOfStoredDay(trip.endDate)
 
         switch phase {
         case .active:
-            let total = (cal.dateComponents([.day], from: start, to: end).day ?? 0) + 1
+            let total = WallClock.storedDayCount(from: start, to: end) + 1
             guard total > 0 else { return nil }
-            let day = (cal.dateComponents([.day], from: start, to: today).day ?? 0) + 1
+            let day = WallClock.storedDayCount(from: start, to: today) + 1
             return "Day \(min(max(day, 1), total)) of \(total)"
         case .upcoming:
-            let days = cal.dateComponents([.day], from: today, to: start).day ?? 0
+            let days = WallClock.storedDayCount(from: today, to: start)
             guard days > 0 else { return nil }
             return days == 1 ? "In 1 day" : "In \(days) days"
         case .past:
@@ -534,23 +537,32 @@ private struct TripRow: View {
     /// The date range spelled out for speech. `formatRange` is right on screen but
     /// its en dash and abbreviated months read poorly aloud.
     private var spokenRange: String {
+        // Format the device-local day naming each anchored date, never the
+        // anchor itself: an anchor formatted locally prints the day before,
+        // anywhere west of UTC (#506).
         let cal = Calendar.current
+        let start = WallClock.deviceDay(from: trip.startDate)
+        let end = WallClock.deviceDay(from: trip.endDate)
         let full = Date.FormatStyle.dateTime.day().month(.wide).year()
-        if cal.isDate(trip.startDate, inSameDayAs: trip.endDate) {
-            return trip.startDate.formatted(full)
+        if cal.isDate(start, inSameDayAs: end) {
+            return start.formatted(full)
         }
-        let sameYear = cal.component(.year, from: trip.startDate)
-            == cal.component(.year, from: trip.endDate)
+        let sameYear = cal.component(.year, from: start)
+            == cal.component(.year, from: end)
         let startPart = sameYear
-            ? trip.startDate.formatted(.dateTime.day().month(.wide))
-            : trip.startDate.formatted(full)
-        return "\(startPart) to \(trip.endDate.formatted(full))"
+            ? start.formatted(.dateTime.day().month(.wide))
+            : start.formatted(full)
+        return "\(startPart) to \(end.formatted(full))"
     }
 
     /// "1 May – 10 May 2026" / "28 Dec 2026 – 3 Jan 2027" / single-day
     /// "5 Mar 2026". Year is suppressed on the start side when both dates
     /// share the same year.
-    static func formatRange(start: Date, end: Date) -> String {
+    static func formatRange(start rawStart: Date, end rawEnd: Date) -> String {
+        // Callers pass a trip's anchored days. Format the device-local day
+        // naming each date so the label reads the same in every zone (#506).
+        let start = WallClock.deviceDay(from: rawStart)
+        let end = WallClock.deviceDay(from: rawEnd)
         let cal = Calendar.current
         let sameDay = cal.isDate(start, inSameDayAs: end)
         let sameYear = cal.component(.year, from: start) == cal.component(.year, from: end)
@@ -925,8 +937,9 @@ private struct TripEditorSheet: View {
             )
             if let existing = try? modelContext.fetch(descriptor).first {
                 name = existing.name
-                startDate = existing.startDate
-                endDate = existing.endDate
+                // Stored days are UTC anchors; the pickers are device-local (#506).
+                startDate = WallClock.deviceDay(from: existing.startDate)
+                endDate = WallClock.deviceDay(from: existing.endDate)
                 notes = existing.notes
                 participantUUIDs = existing.participantPersonUUIDs
             }
@@ -941,9 +954,12 @@ private struct TripEditorSheet: View {
         let cleanName = trimmedName
         guard !cleanName.isEmpty else { return }
         let cleanNotes = trimmedNotes
-        let cal = Calendar.current
-        let normalisedStart = cal.startOfDay(for: startDate)
-        let normalisedEnd = cal.startOfDay(for: endDate)
+        // A trip's start and end name calendar days, so they are anchored at
+        // UTC midnight rather than at device-local midnight (#506). Stored the
+        // old way, an itinerary built in one timezone read a day early in
+        // another.
+        let normalisedStart = WallClock.dayAnchor(from: startDate)
+        let normalisedEnd = WallClock.dayAnchor(from: endDate)
 
         // Set when this save creates a trip or changes an existing trip's name.
         // Only those two cases want a cover fetch: moving the dates or editing

@@ -12,12 +12,16 @@ import SwiftData
 /// The trip's own days are highlighted so the user can see what weekday each
 /// date falls on and which days have events. Which days count as "has events"
 /// is derived exactly the way `TripDetailView.grouped` buckets items — item
-/// `dayDate` (device-local start-of-day), plus the check-out `endDate` for a
-/// `.stay` whose check-out differs from its check-in — so the calendar can
-/// never disagree with the timeline. Events only exist inside the trip range,
-/// so months outside the trip correctly show a plain weekday-reference grid.
-/// All grid / day math uses `Calendar.current`, matching how `dayDate` is
-/// stored.
+/// `dayDate`, plus the check-out `endDate` for a `.stay` whose check-out
+/// differs from its check-in — so the calendar can never disagree with the
+/// timeline. Events only exist inside the trip range, so months outside the
+/// trip correctly show a plain weekday-reference grid.
+///
+/// The grid itself is the DEVICE's calendar, so all grid math stays in
+/// `Calendar.current`. Stored days are UTC anchors (#506), so each one is
+/// projected onto the grid with `WallClock.deviceDay(from:)` first. Projecting
+/// is the whole job: read an anchor in the device calendar directly and it
+/// lands on the previous cell, anywhere west of UTC.
 struct TripCalendarPopover: View {
     let trip: LocalTrip
 
@@ -34,7 +38,7 @@ struct TripCalendarPopover: View {
             filter: #Predicate<LocalItineraryItem> { $0.tripUUID == tripID }
         )
         let cal = Calendar.current
-        let start = cal.startOfDay(for: trip.startDate)
+        let start = cal.startOfDay(for: WallClock.deviceDay(from: trip.startDate))
         let monthStart = cal.dateInterval(of: .month, for: start)?.start ?? start
         _displayedMonth = State(initialValue: monthStart)
     }
@@ -191,22 +195,23 @@ struct TripCalendarPopover: View {
 
     // MARK: - Derived data
 
-    private var tripStart: Date { Calendar.current.startOfDay(for: trip.startDate) }
-    private var tripEnd: Date { Calendar.current.startOfDay(for: trip.endDate) }
+    private var tripStart: Date { Calendar.current.startOfDay(for: WallClock.deviceDay(from: trip.startDate)) }
+    private var tripEnd: Date { Calendar.current.startOfDay(for: WallClock.deviceDay(from: trip.endDate)) }
 
     /// Set of start-of-day dates that carry at least one event. Mirrors
     /// `TripDetailView.grouped`: every item lands on its `dayDate`, and a
     /// `.stay` whose `endDate` differs from `dayDate` also lights up the
-    /// check-out day. Uses `dayDate`/`endDate` (device-local start-of-day),
-    /// never the UTC-anchored `startTime`, matching how the timeline groups.
+    /// check-out day. Uses `dayDate`/`endDate`, projected onto the device's
+    /// calendar, never the UTC-anchored `startTime`, matching how the timeline
+    /// groups.
     private var eventDays: Set<Date> {
         let cal = Calendar.current
         var days = Set<Date>()
         for item in items {
-            let inDay = cal.startOfDay(for: item.dayDate)
+            let inDay = cal.startOfDay(for: WallClock.deviceDay(from: item.dayDate))
             days.insert(inDay)
             if item.kindEnum == .stay, let endDate = item.endDate {
-                let outDay = cal.startOfDay(for: endDate)
+                let outDay = cal.startOfDay(for: WallClock.deviceDay(from: endDate))
                 if outDay != inDay { days.insert(outDay) }
             }
         }
