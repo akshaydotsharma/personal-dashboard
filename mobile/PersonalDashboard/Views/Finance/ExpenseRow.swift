@@ -22,7 +22,11 @@ struct ExpenseRow: View {
     @Environment(\.expenseRowLookup) private var lookup: ExpenseRowLookup
 
     var body: some View {
-        HStack(spacing: Space.md) {
+        // Resolved once per paint and threaded through: `expense.splits`
+        // decodes JSON, and the badge row, the badge-row gate and the
+        // accessibility label all need the answer (#508 / the #442 lesson).
+        let roster = splitRoster
+        return HStack(spacing: Space.md) {
             Image(systemName: expense.categoryEnum.sfSymbol)
                 .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(Tokens.accentFinance)
@@ -54,8 +58,8 @@ struct ExpenseRow: View {
                     .font(.edCaption)
                     .foregroundStyle(Tokens.mutedSoft)
                 }
-                if hasBadges {
-                    badgeRow
+                if hasBadges(roster) {
+                    badgeRow(roster)
                 }
             }
 
@@ -82,7 +86,7 @@ struct ExpenseRow: View {
         .flatContentRow(iOSVerticalPadding: Space.sm + 2)
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
-        .accessibilityLabel(accessibilityLabel)
+        .accessibilityLabel(accessibilityLabel(roster))
     }
 
     // MARK: - Person / Event badges (#183)
@@ -99,10 +103,24 @@ struct ExpenseRow: View {
         personLabel != nil || eventLabel != nil
     }
 
-    /// Whether any badge (person, event, split, or trip) should render on the
-    /// secondary badge row.
-    private var hasBadges: Bool {
-        hasTags || expense.isSplit || showsTripBadge
+    /// Whether any badge (person, event, split, trip, or split avatars) should
+    /// render on the secondary badge row.
+    private func hasBadges(_ roster: SplitAvatarRoster?) -> Bool {
+        hasTags || expense.isSplit || showsTripBadge || roster != nil
+    }
+
+    /// Who paid and who shared, for a trip expense (#508). Trip surfaces only:
+    /// the Finance list already carries a trip badge naming the trip and the
+    /// full bill, and its rows include every ordinary expense, which has no
+    /// payer or split to describe. `nil` whenever there is nothing to say.
+    private var splitRoster: SplitAvatarRoster? {
+        guard showsOriginalFirst else { return nil }
+        return SplitAvatarRoster.make(
+            payerPersonUUID: expense.paidByPersonUUID,
+            splits: expense.splits,
+            name: { lookup.personName(uuid: $0) },
+            colorHex: { lookup.personColorHex(uuid: $0) }
+        )
     }
 
     /// The Finance list leads with the user's SHARE of a group-split trip
@@ -136,7 +154,7 @@ struct ExpenseRow: View {
         return Color(personHex: hex)
     }
 
-    private var badgeRow: some View {
+    private func badgeRow(_ roster: SplitAvatarRoster?) -> some View {
         HStack(spacing: Space.xs) {
             if let personLabel {
                 PersonEventBadge(kind: .person, label: personLabel, tint: personTint)
@@ -149,6 +167,9 @@ struct ExpenseRow: View {
             }
             if showsTripBadge {
                 tripBadge
+            }
+            if let roster {
+                SplitAvatarCluster(roster: roster)
             }
         }
     }
@@ -271,7 +292,7 @@ struct ExpenseRow: View {
         return expense.isRefund ? "+\(base)" : base
     }
 
-    private var accessibilityLabel: String {
+    private func accessibilityLabel(_ roster: SplitAvatarRoster?) -> String {
         let spokenValue = leadsWithShare ? abs(expense.myShareSGD) : expense.sgdAmount
         let amountSpoken = expense.isRefund
             ? "refund \(FinanceDashboardBand.formatMoney(spokenValue))"
@@ -287,6 +308,7 @@ struct ExpenseRow: View {
         if let eventLabel { pieces.append("event \(eventLabel)") }
         if showsTripBadge { pieces.append("on trip \(tripName)") }
         if expense.isSplit { pieces.append("split \(expense.numberOfShares) ways, your \(splitLabel)") }
+        if let roster { pieces.append(roster.spokenLabel) }
         return pieces.joined(separator: ", ") + ". Tap to edit."
     }
 }
