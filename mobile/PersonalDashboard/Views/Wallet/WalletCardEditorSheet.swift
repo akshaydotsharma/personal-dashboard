@@ -507,38 +507,42 @@ struct WalletCardEditorSheet: View {
         ticketAttachmentPath = card.attachmentPath
         ticketHasBarcode = card.hasBarcode
 
-        // Stored times are UTC wall-clock anchors, so each is converted back to a
-        // device-local picker date carrying the same printed H:mm.
-        dayDate = card.dayDate
+        // Stored days are UTC anchors and stored times are UTC wall-clock
+        // anchors (#506), so each is converted back to the device-local picker
+        // value: the local day naming the stored date, carrying the printed H:mm.
+        let storedDay = WallClock.deviceDay(from: card.dayDate)
+        dayDate = storedDay
         if let start = card.startTime {
             hasTime = true
-            dayDate = WallClock.devicePickerDate(onDay: card.dayDate, anchor: start)
+            dayDate = WallClock.devicePickerDate(onDay: storedDay, anchor: start)
         }
         if let arrival = card.arrivalTime {
             hasArrival = true
-            arrivalTime = WallClock.devicePickerDate(onDay: card.dayDate, anchor: arrival)
+            arrivalTime = WallClock.devicePickerDate(onDay: storedDay, anchor: arrival)
         }
         if let end = card.endDate {
-            endDate = end
+            let storedEndDay = WallClock.deviceDay(from: end)
+            endDate = storedEndDay
             if let endT = card.endTime {
                 hasEndTime = true
-                endDate = WallClock.devicePickerDate(onDay: end, anchor: endT)
+                endDate = WallClock.devicePickerDate(onDay: storedEndDay, anchor: endT)
             }
         } else {
-            endDate = Calendar.current.date(byAdding: .day, value: 1, to: card.dayDate) ?? card.dayDate
+            endDate = Calendar.current.date(byAdding: .day, value: 1, to: storedDay) ?? storedDay
         }
     }
 
     // MARK: - Persistence
 
     private func save() {
-        let cal = Calendar.current
-        let day = cal.startOfDay(for: dayDate)
+        // The day is anchored at UTC midnight of the day the picker showed, so
+        // it stops moving with the device timezone (#506).
+        let day = WallClock.dayAnchor(from: dayDate)
         let startValue: Date? = hasTime ? WallClock.utcAnchor(onDay: dayDate, timeFrom: dayDate) : nil
         let arrivalValue: Date? = (kind.layout == .boardingPass && hasTime && hasArrival)
             ? WallClock.utcAnchor(onDay: dayDate, timeFrom: arrivalTime)
             : nil
-        let endDateValue: Date? = kind == .stay ? cal.startOfDay(for: endDate) : nil
+        let endDateValue: Date? = kind == .stay ? WallClock.dayAnchor(from: endDate) : nil
         let endTimeValue: Date? = (kind == .stay && hasEndTime)
             ? WallClock.utcAnchor(onDay: endDate, timeFrom: endDate)
             : nil

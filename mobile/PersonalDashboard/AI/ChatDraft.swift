@@ -413,13 +413,10 @@ extension ChatDraft {
         return pieces.joined(separator: " · ")
     }
 
-    /// Inclusive day count between two dates (day-granularity).
+    /// Inclusive day count between two dates, counted in UTC to match the
+    /// calendar `parseAnyDate` read them in (#506).
     private static func inclusiveDays(start: Date, end: Date) -> Int {
-        let cal = Calendar(identifier: .gregorian)
-        let s = cal.startOfDay(for: start)
-        let e = cal.startOfDay(for: end)
-        let comps = cal.dateComponents([.day], from: s, to: e)
-        return max(1, (comps.day ?? 0) + 1)
+        max(1, WallClock.storedDayCount(from: start, to: end) + 1)
     }
 
     /// "14–21 Jun" / "29 Jun – 5 Jul" / "30 Dec 2026 – 4 Jan 2027".
@@ -450,20 +447,28 @@ extension ChatDraft {
         return nil
     }
 
+    // Every one of these prints a day that `parseAnyDate` read in UTC, so they
+    // read in UTC too. Unpinned, a draft preview showed the day BEFORE the one
+    // the model wrote, anywhere west of UTC — the same class of defect as #506,
+    // and it made a correct draft look wrong before the user confirmed it.
     private static let monthShort: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "MMM"; return f
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "MMM"; return f
     }()
 
     private static let dayMonth: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "d MMM"; return f
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "d MMM"; return f
     }()
 
     private static let dayMonthYear: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "d MMM yyyy"; return f
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "d MMM yyyy"; return f
     }()
 
     private static let shortDayMonth: DateFormatter = {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "d MMM"; return f
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "d MMM"; return f
     }()
 
     private static let dateOnlyUTC: DateFormatter = {

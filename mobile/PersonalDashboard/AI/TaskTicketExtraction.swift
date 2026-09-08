@@ -99,10 +99,13 @@ struct TaskTicketContext: Equatable, Sendable {
 
     /// The stop's day, at its start time when it has one and at local midnight
     /// otherwise.
+    ///
+    /// The stored day is a UTC anchor (#506), so it is converted to the
+    /// device-local day naming that date before a local hour is set on it.
     private static func moment(of item: LocalItineraryItem) -> Date? {
         var local = Calendar(identifier: .gregorian)
         local.timeZone = .current
-        let day = local.startOfDay(for: item.dayDate)
+        let day = local.startOfDay(for: WallClock.deviceDay(from: item.dayDate))
         guard let start = item.startTime else { return day }
         var utc = Calendar(identifier: .gregorian)
         utc.timeZone = TimeZone(secondsFromGMT: 0) ?? .current

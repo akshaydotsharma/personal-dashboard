@@ -1134,14 +1134,15 @@ struct EmailToItinerary {
     /// the same way `ExecuteDraftAction.addItineraryItems` does so the
     /// signature matches what actually gets stored.
     private static func proposedItem(from dict: [String: AnthropicJSONValue], confirmation: String) -> EmailItemDedupe.Proposed {
-        let cal = Calendar(identifier: .gregorian)
         let title = (dict["title"]?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let kindRaw = (dict["kind"]?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let kind = (ItineraryKind(rawValue: kindRaw) ?? .activity).rawValue
-        let day = parseAnyISODate(dict["day_date"]?.stringValue).map { cal.startOfDay(for: $0) } ?? Date.distantPast
+        // Anchored at UTC midnight so the dedupe key matches the stored row's
+        // day in any timezone (#506).
+        let day = (dict["day_date"]?.stringValue).flatMap { WallClock.dayAnchor(fromISO: $0) } ?? Date.distantPast
         var endDate: Date? = nil
-        if kind == "stay", let raw = dict["end_date"]?.stringValue, let parsed = parseAnyISODate(raw) {
-            endDate = cal.startOfDay(for: parsed)
+        if kind == "stay", let raw = dict["end_date"]?.stringValue {
+            endDate = WallClock.dayAnchor(fromISO: raw)
         }
         // Parse start_time the SAME way the executor stores it
         // (`ExecuteDraftAction.parseWallClockTime`): strip any trailing tz

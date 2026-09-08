@@ -1659,7 +1659,9 @@ struct EventPickerSheet: View {
     }
 
     private func dateSubtitle(_ event: LocalEvent) -> String? {
+        // An event's days are UTC anchors (#506), so the formatter reads UTC.
         let fmt = DateFormatter()
+        fmt.timeZone = TimeZone(identifier: "UTC")
         fmt.dateFormat = "d MMM yyyy"
         if let start = event.startDate, let end = event.endDate {
             return "\(fmt.string(from: start)) – \(fmt.string(from: end))"

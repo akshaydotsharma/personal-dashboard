@@ -105,7 +105,9 @@ struct WalletView: View {
     }
 
     private var groups: WalletGroups {
-        WalletEntry.grouped(entries, today: Calendar.current.startOfDay(for: .now))
+        // A card's `validThrough` is a UTC-anchored day (#506), so "today" is
+        // anchored the same way before the Upcoming / Past split compares them.
+        WalletEntry.grouped(entries, today: WallClock.todayAnchor())
     }
 
     var body: some View {

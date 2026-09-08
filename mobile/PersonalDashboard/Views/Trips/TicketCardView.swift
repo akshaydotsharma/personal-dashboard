@@ -355,8 +355,14 @@ struct TicketCardView: View {
     }
 
     /// "JUL 3" style month + day, shared by the stay and event heroes.
+    /// "SEP 4". The incoming value is a UTC anchor — either an anchored day or
+    /// a UTC wall-clock time, both of which carry the intended calendar day in
+    /// their UTC components — so it is projected to the device-local day naming
+    /// that date before formatting. Format the anchor directly and the card
+    /// prints the day before, anywhere west of UTC (#506).
     private func bigDate(_ date: Date) -> String {
-        date.formatted(.dateTime.month(.abbreviated).day()).uppercased()
+        WallClock.deviceDay(from: date)
+            .formatted(.dateTime.month(.abbreviated).day()).uppercased()
     }
 
     /// One end of a two-endpoint hero: a big value over a small label.
@@ -732,10 +738,10 @@ struct TicketCardView: View {
     /// nights".
     private var nightsCount: Int? {
         guard let end = item.endDate else { return nil }
-        let cal = Calendar.current
-        let inDay = cal.startOfDay(for: item.primaryDate)
-        let outDay = cal.startOfDay(for: end)
-        let n = cal.dateComponents([.day], from: inDay, to: outDay).day ?? 0
+        // Both days are UTC anchors, so the span is counted in the UTC calendar
+        // (#506). Counted in the device calendar, a DST boundary between the two
+        // could drop or add a night.
+        let n = WallClock.storedDayCount(from: item.primaryDate, to: end)
         return n > 0 ? n : nil
     }
 

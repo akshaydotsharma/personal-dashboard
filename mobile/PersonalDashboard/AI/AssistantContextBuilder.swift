@@ -191,7 +191,7 @@ struct AssistantContextBuilder {
 
                 // Full day-by-day breakdown only for the 3 most-recently-updated trips.
                 if idx < 3, !items.isEmpty {
-                    let groups = Dictionary(grouping: items, by: { $0.dayDate })
+                    let groups = Dictionary(grouping: items, by: { WallClock.startOfStoredDay($0.dayDate) })
                     let sortedDays = groups.keys.sorted()
                     for day in sortedDays {
                         let dayItems = groups[day] ?? []
@@ -398,7 +398,8 @@ struct AssistantContextBuilder {
         var countByTrip: [UUID: Int] = [:]
         for item in allItems { countByTrip[item.tripUUID, default: 0] += 1 }
 
-        let today = Calendar(identifier: .gregorian).startOfDay(for: Date())
+        // Trip days are UTC anchors (#506), so "today" is anchored to match.
+        let today = WallClock.todayAnchor()
 
         // Upcoming/ongoing first (endDate >= today), by start date; then past
         // trips, most recent end first. Bookings almost always target a future
@@ -486,17 +487,13 @@ struct AssistantContextBuilder {
         return f
     }()
 
-    /// Inclusive day count between two `startOfDay`-normalised dates.
+    /// Inclusive day count between two UTC-anchored days (#506).
     private static func dayCount(from start: Date, to end: Date) -> Int {
-        let cal = Calendar(identifier: .gregorian)
-        let comps = cal.dateComponents([.day], from: start, to: end)
-        return (comps.day ?? 0) + 1
+        WallClock.storedDayCount(from: start, to: end) + 1
     }
 
     /// 1-indexed day number for a given day inside a trip ("Day 1" = startDate).
     private static func dayNumber(start: Date, day: Date) -> Int {
-        let cal = Calendar(identifier: .gregorian)
-        let comps = cal.dateComponents([.day], from: start, to: day)
-        return (comps.day ?? 0) + 1
+        WallClock.storedDayCount(from: start, to: day) + 1
     }
 }

@@ -203,7 +203,7 @@ extension TicketCardData {
         // Undated tickets fall back to the day the row was created, purely so
         // the card has somewhere to sort. `WalletEntry` keeps them out of Past
         // regardless — see the `validThrough` note there.
-        self.primaryDate = ticket.eventDate ?? Calendar.current.startOfDay(for: ticket.createdAt)
+        self.primaryDate = ticket.eventDate ?? WallClock.dayAnchor(from: ticket.createdAt)
         // The task model stores the printed time as a STRING on purpose (#163 /
         // #168: a Date reformats into the phone's timezone and stops matching the
         // number the gate is reading). So there is no `Date` to hand over here —

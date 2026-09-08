@@ -291,7 +291,6 @@ struct TicketExtraction {
         attachmentPath: String,
         nextSortOrder: inout [Date: Int]
     ) -> LocalItineraryItem {
-        let cal = Calendar(identifier: .gregorian)
 
         // Kind: extracted value if valid, else activity. A decoded boarding pass
         // (BCBP) is always a flight, so it forces transport/flight regardless of
@@ -310,9 +309,10 @@ struct TicketExtraction {
             : nil
 
         // Day: extracted date, else trip start (a safe in-range fallback the
-        // user can correct in the editor).
-        let day = Self.parseAnyISODate(extracted?.dayDate).map { cal.startOfDay(for: $0) }
-            ?? cal.startOfDay(for: trip.startDate)
+        // user can correct in the editor). Anchored at UTC midnight so the day
+        // does not move with the device timezone (#506).
+        let day = (extracted?.dayDate).flatMap { WallClock.dayAnchor(fromISO: $0) }
+            ?? WallClock.startOfStoredDay(trip.startDate)
 
         let startTime = Self.parseWallClockTime(extracted?.startTime, onDay: day)
         let arrivalTime = Self.parseWallClockTime(extracted?.arrivalTime, onDay: day)
@@ -423,7 +423,6 @@ struct TicketExtraction {
         decoded: DecodedBarcode?,
         attachmentPath: String
     ) -> LocalWalletCard {
-        let cal = Calendar(identifier: .gregorian)
 
         let hasFlightNumber = firstNonEmpty(bcbp?.flightLabel, extracted?.flightNumber) != nil
         let kind = WalletCardKind.infer(
@@ -433,8 +432,8 @@ struct TicketExtraction {
             hasFlightNumber: hasFlightNumber
         )
 
-        let day = Self.parseAnyISODate(extracted?.dayDate).map { cal.startOfDay(for: $0) }
-            ?? cal.startOfDay(for: Date())
+        let day = (extracted?.dayDate).flatMap { WallClock.dayAnchor(fromISO: $0) }
+            ?? WallClock.todayAnchor()
 
         // Same merge precedence as the trip path: BCBP is authoritative for the
         // machine-read codes, the model fills the human-readable extras.
@@ -577,14 +576,13 @@ struct TicketExtraction {
     /// upload: a re-fetch inside the loop would not see the items inserted by
     /// earlier iterations, and two legs on one day would share a sortOrder.
     static func sortOrderSeeds(tripUUID: UUID, context: ModelContext) -> [Date: Int] {
-        let cal = Calendar(identifier: .gregorian)
         let fk = tripUUID
         let existing = (try? context.fetch(
             FetchDescriptor<LocalItineraryItem>(predicate: #Predicate { $0.tripUUID == fk })
         )) ?? []
         var seeds: [Date: Int] = [:]
         for item in existing {
-            let day = cal.startOfDay(for: item.dayDate)
+            let day = WallClock.startOfStoredDay(item.dayDate)
             seeds[day] = max(seeds[day] ?? -1, item.sortOrder)
         }
         return seeds
@@ -861,9 +859,13 @@ extension TicketExtraction {
     Give each segment its own date, departure time, arrival time, seat and flight number as printed for that segment. Booking-wide values such as the booking reference, the PNR and the passenger name apply to every segment: repeat them on each one. Ignore pages that carry only fare rules, conditions, baggage allowances, payment details or terms; they are not segments.
     """
 
+    /// `yyyy-MM-dd` pinned to UTC. The trip range it prints is built from
+    /// UTC-anchored day fields (#506), so an unpinned formatter told the model
+    /// the trip started a day early and biased every year it had to resolve.
     private static let promptDateFormatter: DateFormatter = {
         let fmt = DateFormatter()
-        fmt.calendar = Calendar(identifier: .gregorian)
+        fmt.calendar = WallClock.dayCalendar
+        fmt.timeZone = TimeZone(identifier: "UTC")
         fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.dateFormat = "yyyy-MM-dd"
         return fmt

@@ -22,8 +22,8 @@ enum EmailItemDedupe {
     /// reduced to the fields that define equivalence.
     struct Proposed {
         let kind: String          // ItineraryKind.rawValue, lowercased
-        let dayDate: Date         // startOfDay
-        let endDate: Date?        // startOfDay, stays only
+        let dayDate: Date         // UTC-anchored day (#506)
+        let endDate: Date?        // UTC-anchored day, stays only
         let title: String         // raw title (for storage)
         let confirmation: String  // extracted code, or "" if none
         let startTime: Date?      // UTC wall-clock departure time, or nil
@@ -226,9 +226,15 @@ enum EmailItemDedupe {
         code.uppercased().filter { $0.isLetter || $0.isNumber }
     }
 
+    /// `yyyy-MM-dd` read in UTC. Days are stored as UTC anchors (#506), so the
+    /// key must be read in the same calendar the day was written in. Read
+    /// through `Calendar.current` (the default the gregorian initializer gives
+    /// you) the key moved with the device timezone, exactly as `timeKey` below
+    /// would have if it had not been pinned to UTC: re-forwarding the same
+    /// booking email from another zone then produced a different key, and a
+    /// duplicate stop.
     private static func dayKey(_ date: Date) -> String {
-        let cal = Calendar(identifier: .gregorian)
-        let c = cal.dateComponents([.year, .month, .day], from: date)
+        let c = WallClock.dayCalendar.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 

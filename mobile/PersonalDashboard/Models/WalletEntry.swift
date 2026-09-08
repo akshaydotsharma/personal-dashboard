@@ -443,7 +443,8 @@ extension WalletEntry {
         }
     }
 
-    /// Split into upcoming / past and sort each group. `today` is start-of-day.
+    /// Split into upcoming / past and sort each group. `today` is a
+    /// UTC-anchored day, matching how `day` and `validThrough` are stored (#506).
     static func grouped(_ entries: [WalletEntry], today: Date) -> WalletGroups {
         var groups = WalletGroups()
         for entry in entries {

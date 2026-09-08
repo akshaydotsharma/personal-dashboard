@@ -953,15 +953,17 @@ struct TripDetailView: View {
     /// entry's effective time (`startTime` for single/check-in,
     /// `endTime` for check-out).
     private var grouped: [(day: Date, entries: [TimelineEntry])] {
-        let cal = Calendar.current
         var buckets: [Date: [TimelineEntry]] = [:]
 
         for item in items {
             let kind = item.kindEnum
-            let inDay = cal.startOfDay(for: item.dayDate)
+            // Days are UTC-anchored (#506), so the bucket key is read through
+            // the UTC calendar. Reading it through `Calendar.current` is what
+            // made a day move when the device timezone changed.
+            let inDay = WallClock.startOfStoredDay(item.dayDate)
 
             if kind == .stay, let endDate = item.endDate {
-                let outDay = cal.startOfDay(for: endDate)
+                let outDay = WallClock.startOfStoredDay(endDate)
                 buckets[inDay, default: []].append(.stayCheckIn(item: item))
                 if outDay != inDay {
                     buckets[outDay, default: []].append(.stayCheckOut(item: item))
@@ -996,10 +998,11 @@ struct TripDetailView: View {
     /// Default day to seed the FAB-launched editor. Today if it falls
     /// within the trip's range; else the trip's start date.
     private var defaultDayForNewItem: Date {
-        let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        let start = cal.startOfDay(for: trip.startDate)
-        let end = cal.startOfDay(for: trip.endDate)
+        // "Today" is whichever day the device says it is, anchored so it
+        // compares against the trip's anchored range (#506).
+        let today = WallClock.todayAnchor()
+        let start = WallClock.startOfStoredDay(trip.startDate)
+        let end = WallClock.startOfStoredDay(trip.endDate)
         if today >= start && today <= end { return today }
         return start
     }
@@ -1347,14 +1350,17 @@ private struct TripDayEyebrow: View {
     let isRailNode: Bool
 
     var body: some View {
-        let cal = Calendar.current
-        let tripStart = cal.startOfDay(for: trip.startDate)
-        let tripEnd = cal.startOfDay(for: trip.endDate)
+        // Every value here is a UTC-anchored day (#506): the range test and the
+        // "Day N" count run in the UTC calendar, and the label formats the
+        // device-local day naming the same date. Formatting the anchor directly
+        // prints the day before, anywhere west of UTC.
+        let tripStart = WallClock.startOfStoredDay(trip.startDate)
+        let tripEnd = WallClock.startOfStoredDay(trip.endDate)
         let withinTrip = day >= tripStart && day <= tripEnd
-        let dayNumber = cal.dateComponents([.day], from: tripStart, to: day).day.map { $0 + 1 } ?? 0
+        let dayNumber = WallClock.storedDayCount(from: tripStart, to: day) + 1
         // The date is now the section header, so it drops the uppercase/tracked
         // eyebrow treatment for a readable title case (e.g. "Wed, 14 May").
-        let weekdayDate = day
+        let weekdayDate = WallClock.deviceDay(from: day)
             .formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
 
         return HStack(alignment: .center, spacing: Space.sm) {
@@ -2356,14 +2362,17 @@ struct ItineraryItemEditorSheet: View {
 
         switch target {
         case .new(let day):
-            dayDate = cal.startOfDay(for: day)
+            // `day` arrives as a UTC-anchored day (#506). The pickers are
+            // device-local, so seed them with the local day naming that date.
+            let seedDay = WallClock.deviceDay(from: day)
+            dayDate = seedDay
             // Default kind heuristic: a first-day item is most often a Stay.
-            if cal.isDate(day, inSameDayAs: trip.startDate) {
+            if WallClock.isSameStoredDay(day, trip.startDate) {
                 kind = .stay
-                endDate = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: day)) ?? dayDate
+                endDate = cal.date(byAdding: .day, value: 1, to: seedDay) ?? seedDay
             } else {
                 kind = .activity
-                endDate = cal.startOfDay(for: day)
+                endDate = seedDay
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 titleFocused = true
@@ -2376,7 +2385,9 @@ struct ItineraryItemEditorSheet: View {
                 title = existing.title
                 kind = existing.kindEnum
                 transportMode = existing.transportModeEnum ?? .flight
-                dayDate = existing.dayDate
+                // Stored days are UTC anchors; the pickers are device-local.
+                let storedDay = WallClock.deviceDay(from: existing.dayDate)
+                dayDate = storedDay
                 notes = existing.notes
                 address = existing.address
                 googleMapsLink = existing.googleMapsLink
@@ -2387,24 +2398,25 @@ struct ItineraryItemEditorSheet: View {
                     // with a Date carrying the same H:M on the item's day, so
                     // the picker surfaces the stated time.
                     hasTime = true
-                    dayDate = deviceLocalPickerDate(onDay: existing.dayDate, utcWallClock: start)
+                    dayDate = deviceLocalPickerDate(onDay: storedDay, utcWallClock: start)
                 }
                 if let arrival = existing.arrivalTime {
                     // Stored UTC wall-clock; seed the device-local picker on the
                     // item's day so it surfaces the stated arrival time.
                     hasArrival = true
-                    arrivalTime = deviceLocalPickerDate(onDay: existing.dayDate, utcWallClock: arrival)
+                    arrivalTime = deviceLocalPickerDate(onDay: storedDay, utcWallClock: arrival)
                 }
                 if let end = existing.endDate {
-                    endDate = end
+                    let storedEndDay = WallClock.deviceDay(from: end)
+                    endDate = storedEndDay
                     if let endT = existing.endTime {
                         hasEndTime = true
-                        endDate = deviceLocalPickerDate(onDay: end, utcWallClock: endT)
+                        endDate = deviceLocalPickerDate(onDay: storedEndDay, utcWallClock: endT)
                     }
                 } else if existing.kindEnum == .stay {
                     // Stay with no persisted endDate (legacy item before the
                     // field existed): seed a sane default of +1 day.
-                    endDate = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: existing.dayDate)) ?? existing.dayDate
+                    endDate = cal.date(byAdding: .day, value: 1, to: storedDay) ?? storedDay
                 }
             }
         }
@@ -2416,15 +2428,15 @@ struct ItineraryItemEditorSheet: View {
         let cleanNotes = trimmedNotes
         let cleanAddress = address.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanMapsLink = googleMapsLink.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cal = Calendar.current
-        let normalisedDay = cal.startOfDay(for: dayDate)
+        let normalisedDay = WallClock.dayAnchor(from: dayDate)
 
         // Times are persisted as UTC wall-clock: the picker carries a
         // device-local H:M, and we store a Date whose UTC H:M equals what the
         // user picked, anchored on the item's day. This makes itinerary times
         // timezone-independent (what you pick is what shows, forever). The day
-        // bucket (`normalisedDay`) stays device-local start-of-day so grouping
-        // is unaffected.
+        // bucket (`normalisedDay`) is anchored the same way, at UTC midnight of
+        // the day the picker showed, so the day is timezone-independent too
+        // (#506).
         //
         // For non-stay or when "Include time" is off: persist only the day.
         // For non-stay with time on: persist startTime as UTC wall-clock on
@@ -2442,7 +2454,7 @@ struct ItineraryItemEditorSheet: View {
         let transportModeValue: TransportMode? = kind == .transport ? transportMode : nil
 
         // Stay-only end fields. Other kinds clear both.
-        let endDateValue: Date? = kind == .stay ? cal.startOfDay(for: endDate) : nil
+        let endDateValue: Date? = kind == .stay ? WallClock.dayAnchor(from: endDate) : nil
         let endTimeValue: Date? = (kind == .stay && hasEndTime) ? utcWallClock(onDay: endDate, timeFrom: endDate) : nil
 
         switch target {
@@ -2475,7 +2487,7 @@ struct ItineraryItemEditorSheet: View {
                 existing.title = cleanTitle
                 existing.kindEnum = kind
                 existing.transportModeEnum = transportModeValue
-                if cal.startOfDay(for: existing.dayDate) != normalisedDay {
+                if WallClock.startOfStoredDay(existing.dayDate) != normalisedDay {
                     // Day moved: re-sortOrder so the item lands at the end of
                     // the new day instead of slotting into the old position.
                     existing.sortOrder = nextSortOrder(for: normalisedDay)
