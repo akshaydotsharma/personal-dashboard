@@ -20,6 +20,11 @@ struct ExpenseRowLookup {
     /// used before. People are few, so the linear scan costs nothing.
     private var namedColors: [(name: String, colorHex: String)] = []
 
+    /// Name by person FK, for the split avatars (#508), which resolve a person
+    /// id straight out of the split payload rather than reading a denormalised
+    /// name off the expense row.
+    private var nameByPersonUUID: [UUID: String] = [:]
+
     /// Trip name by trip FK.
     private var nameByTripUUID: [UUID: String] = [:]
 
@@ -35,6 +40,7 @@ struct ExpenseRowLookup {
     init(people: [LocalPerson], trips: [LocalTrip]) {
         for person in people {
             colorByPersonUUID[person.clientUUID] = person.colorHex
+            nameByPersonUUID[person.clientUUID] = person.name
             namedColors.append((name: person.name, colorHex: person.colorHex))
         }
         for trip in trips {
@@ -54,6 +60,18 @@ struct ExpenseRowLookup {
             }
         }
         return nil
+    }
+
+    /// Display name for a person id, or `nil` when the person has been deleted
+    /// since a split recorded them.
+    func personName(uuid: UUID) -> String? {
+        nameByPersonUUID[uuid]
+    }
+
+    /// Colour for a person id alone (no denormalised-name fallback), for the
+    /// split avatars where the id is all the payload carries.
+    func personColorHex(uuid: UUID) -> String? {
+        colorByPersonUUID[uuid]
     }
 
     /// Name of the trip a row belongs to, or `nil` when the FK is missing or the

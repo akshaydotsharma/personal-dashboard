@@ -273,6 +273,8 @@ targets:
       - path: PersonalDashboard/Views/Finance/ExpenseRowLookup.swift
       - path: PersonalDashboard/Views/Finance/FinanceFormatters.swift
       - path: PersonalDashboard/Views/Finance/PersonEventBadge.swift
+      # Payer / sharer letter avatars on a trip expense row (#508).
+      - path: PersonalDashboard/Views/Finance/SplitAvatarCluster.swift
       # Finance surface (issue #281). The camera capture path
       # (CameraPicker.swift, UIImagePickerController) is iOS-only and stays OUT
       # of this target; FinanceView gates its menu item + fullScreenCover with
