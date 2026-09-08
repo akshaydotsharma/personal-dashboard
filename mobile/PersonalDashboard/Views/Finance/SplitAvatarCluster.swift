@@ -52,16 +52,11 @@ struct SplitAvatarRoster: Equatable {
     static let maxSharers = 4
 
     let payer: SplitAvatarParty
-    /// Parties holding a positive share, payer first, deduped. Empty for an
-    /// unsplit expense.
-    let sharers: [SplitAvatarParty]
 
-    /// The sharer cluster only earns its space when the split says something
-    /// the payer avatar doesn't: a bill whose only sharer IS the payer was
-    /// consumed by one person, which is the unsplit case.
-    var showsSharers: Bool {
-        sharers.count > 1 || (sharers.count == 1 && sharers[0].party != payer.party)
-    }
+    /// Parties holding a positive share, payer first, deduped. Never empty: an
+    /// expense with no recorded split was consumed by whoever paid it, so the
+    /// payer stands as the sole sharer.
+    let sharers: [SplitAvatarParty]
 
     /// The avatars that render, capped.
     var visibleSharers: [SplitAvatarParty] {
@@ -73,9 +68,11 @@ struct SplitAvatarRoster: Equatable {
         max(sharers.count - Self.maxSharers, 0)
     }
 
-    /// Build the roster for one expense, or `nil` when there is nothing worth
-    /// showing: the user paid and nobody else was in on it, which is every
-    /// ordinary expense and so leaves the Finance list untouched.
+    /// Build the roster for one expense. Always answers both halves of the
+    /// question, including when they coincide: an expense you paid and shared
+    /// with nobody reads "Y paid · Y", not a blank badge line. A row that says
+    /// nothing can't be told apart from a row with nothing recorded, and on the
+    /// trip surface every row has a payer even when no split was entered.
     ///
     /// - Parameters:
     ///   - payerPersonUUID: `LocalExpense.paidByPersonUUID`; nil = the user.
@@ -87,7 +84,7 @@ struct SplitAvatarRoster: Equatable {
         splits: [ExpenseSplitEntry],
         name: (UUID) -> String?,
         colorHex: (UUID) -> String?
-    ) -> SplitAvatarRoster? {
+    ) -> SplitAvatarRoster {
         func party(for id: UUID?) -> SplitAvatarParty {
             guard let id else {
                 return SplitAvatarParty(party: .me, name: "You", colorHex: nil, initial: "Y")
@@ -125,10 +122,11 @@ struct SplitAvatarRoster: Equatable {
             sharers.insert(sharers.remove(at: index), at: 0)
         }
 
-        let roster = SplitAvatarRoster(payer: payer, sharers: sharers)
-        let payerIsWorthShowing = payer.party != .me
-        guard payerIsWorthShowing || roster.showsSharers else { return nil }
-        return roster
+        // No recorded split means the payer consumed the bill alone.
+        if sharers.isEmpty {
+            sharers = [payer]
+        }
+        return SplitAvatarRoster(payer: payer, sharers: sharers)
     }
 
     /// Relative luminance of the dark lettering a filled avatar uses when
@@ -166,7 +164,9 @@ struct SplitAvatarRoster: Equatable {
     /// Priya and you".
     var spokenLabel: String {
         let paid = payer.party == .me ? "You paid" : "\(payer.name) paid"
-        guard showsSharers else { return paid }
+        // The cluster repeats the payer when nobody else was in on the bill.
+        // The avatars show that; saying "split between you" would not.
+        guard sharers != [payer] else { return paid }
         let spoken = sharers.map { $0.party == .me ? "you" : $0.name }
         return "\(paid), split between \(spoken.formatted(.list(type: .and)))"
     }
@@ -193,20 +193,18 @@ struct SplitAvatarCluster: View {
             Text("paid")
                 .font(.edCaption)
                 .foregroundStyle(Tokens.muted)
-            if roster.showsSharers {
-                Text("·")
-                    .font(.edCaption)
-                    .foregroundStyle(Tokens.mutedSoft)
-                HStack(spacing: 2) {
-                    ForEach(roster.visibleSharers) { sharer in
-                        SplitAvatar(party: sharer, style: .sharer)
-                    }
-                    if roster.overflowCount > 0 {
-                        Text("+\(roster.overflowCount)")
-                            .font(.edCaption)
-                            .monospacedDigit()
-                            .foregroundStyle(Tokens.muted)
-                    }
+            Text("·")
+                .font(.edCaption)
+                .foregroundStyle(Tokens.mutedSoft)
+            HStack(spacing: 2) {
+                ForEach(roster.visibleSharers) { sharer in
+                    SplitAvatar(party: sharer, style: .sharer)
+                }
+                if roster.overflowCount > 0 {
+                    Text("+\(roster.overflowCount)")
+                        .font(.edCaption)
+                        .monospacedDigit()
+                        .foregroundStyle(Tokens.muted)
                 }
             }
         }
