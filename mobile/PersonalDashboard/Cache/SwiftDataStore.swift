@@ -625,11 +625,21 @@ final class SwiftDataStore {
     /// (-12, +12). That also makes it idempotent: an already-anchored value is
     /// its own nearest midnight.
     ///
-    /// `updatedAt` is deliberately NOT bumped. The repair is deterministic, so
-    /// every device reaches the same values on its own; bumping would broadcast
-    /// ~100 ops through the sync oplog to say nothing. A peer still on an older
-    /// build is handled at the inbound boundary instead, in
-    /// `DataImportService`, which anchors day fields as it applies them.
+    /// `updatedAt` is deliberately NOT bumped, but not to keep the repair off
+    /// the wire — it does go on the wire. `SyncEngine.computeLocalChanges`
+    /// diffs by SHA-256 content hash, not by `updatedAt`, so re-anchoring ~105
+    /// fields changes ~105 hashes and the next pass emits them as upserts.
+    ///
+    /// The reason to leave `updatedAt` alone is record-level LWW. A repair is
+    /// not a user edit. Bumping the timestamp would make this migration win
+    /// every conflict against a genuine concurrent edit on another device, and
+    /// silently discard it. Left alone, each record keeps competing on its real
+    /// edit time.
+    ///
+    /// The emitted upserts are harmless and convergent: they carry anchored
+    /// values, and `DataImportService` anchors day fields on the way in
+    /// regardless — which is also what stops a peer still on an older build
+    /// from re-introducing the shift.
     ///
     /// Gated by a `UserDefaults` flag so it runs exactly once. Wrapped in
     /// do/catch — never crashes launch.
